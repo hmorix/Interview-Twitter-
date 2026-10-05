@@ -1,0 +1,86 @@
+# ===========================
+# Dependencies
+# ===========================
+node_modules/
+.pnp
+.pnp.js
+
+# ===========================
+# Build Output
+# ===========================
+dist/
+dist-ssr/
+build/
+
+# ===========================
+# Vite
+# ===========================
+*.local
+.vite/
+
+# ===========================
+# Environment & Secrets
+# ===========================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# ===========================
+# Logs
+# ===========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ===========================
+# OS Files
+# ===========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ===========================
+# Editor & IDE
+# ===========================
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.bak
+
+# ===========================
+# Package Manager Locks
+# (keep package-lock.json for reproducibility,
+#  but ignore others if not using them)
+# ===========================
+yarn.lock
+pnpm-lock.yaml
+
+# ===========================
+# Windows Scripts (local dev only)
+# ===========================
+server.ps1
+start.bat
+
+# ===========================
+# Misc
+# ===========================
+*.cache
+.eslintcache
+.stylelintcache

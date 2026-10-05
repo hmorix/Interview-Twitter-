@@ -1,0 +1,25 @@
+{
+  "name": "prepsphere-voice-studio",
+  "version": "1.0.0",
+  "description": "Digital Voice Interview & Model Answer Practice Studio with Vite, Node.js, and Custom Question Quests for Individual and Business preparation",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "interview-practice",
+    "voice-interaction",
+    "vite",
+    "speech-recognition",
+    "business-interview",
+    "speech-to-text",
+    "tts"
+  ],
+  "author": "PrepSphere",
+  "license": "MIT",
+  "devDependencies": {
+    "vite": "^5.4.14"
+  }
+}
