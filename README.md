@@ -48,6 +48,21 @@ As you speak the red text aloud, each word **turns green** when correctly recogn
 - **Start any saved quest instantly** from the saved quests grid
 - Full **delete** management
 
+### 6. 🤖 AI Resume Interview Studio (Powered by NVIDIA NIM)
+- **Resume Upload**: Upload **PDF (.pdf)**, **Word (.docx, .doc)**, or text files with instant client-side text extraction (using `pdfjs-dist` & `mammoth`).
+- **NVIDIA Llama 3.2 NIM Integration**: Uses NVIDIA's free API (`meta/llama-3.2-11b-vision-instruct`) to analyze the candidate's real projects, skills, and experience level.
+- **Multi-Round Selection**:
+  - 💻 **Technical & Architecture Round**: Deep dive into specific tech stacks, framework internals, and system design.
+  - 👔 **HR & Behavioral Round (STAR)**: Cultural fit, career story, conflict resolution, and teamwork.
+  - 🚀 **Project Deep-Dive Round**: Direct questions on actual resume projects, architectural trade-offs, and metrics.
+  - 🤝 **Situational & Leadership Round**: Handling production outages, tight deadlines, and mentorship.
+  - 🎯 **Full Mock Interview (Mixed)**: End-to-end simulation covering the entire interview loop.
+- **Dual Practice Modes**:
+  - **Real Simulation Mode**: Test yourself without seeing the answer! Speak or type naturally, then get instant **NVIDIA AI Grading** (Score /10, Strengths, Missing points, Coaching tips, Model Answer comparison).
+  - **Practice & Teleprompter Mode**: Rehearse speaking the high-scoring STAR model answer out loud with live word-by-word green tracking.
+- **Comprehensive Scorecard**: End-of-round performance readiness score, breakdown, and personalized feedback.
+- **1-Click Sample Resumes**: Alex (Full-Stack), Sarah (Frontend Lead), Marcus (Backend Systems) for instant zero-file testing.
+
 ---
 
 ## 🚀 Getting Started

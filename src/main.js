@@ -19,6 +19,7 @@ import { INITIAL_QUESTS } from './data/questions.js';
 import { SpeechEngine } from './audio/speech-engine.js';
 import { Teleprompter } from './components/teleprompter.js';
 import { QuestCreator } from './components/quest-creator.js';
+import { ResumeStudio } from './components/resume-studio.js';
 
 // App states
 const STATE = {
@@ -44,6 +45,8 @@ class AppController {
     this.navTabs = document.querySelectorAll('.nav-tab-btn');
     this.teleprompterStage = document.getElementById('teleprompterStage');
     this.creatorStage = document.getElementById('creatorStage');
+    this.resumeStage = document.getElementById('resumeStage');
+    this.floatingDock = document.querySelector('.floating-bottom-dock');
     this.dialogueStream = document.getElementById('dialogueStream');
     this.questContextPill = document.getElementById('questContextPill');
     this.questContextTitle = document.getElementById('questContextTitle');
@@ -72,6 +75,11 @@ class AppController {
     );
     this.creator = new QuestCreator(
       this.creatorStage,
+      (quest) => this._onCustomQuestStart(quest)
+    );
+    this.resumeStudio = new ResumeStudio(
+      this.resumeStage,
+      this.engine,
       (quest) => this._onCustomQuestStart(quest)
     );
 
@@ -117,12 +125,12 @@ class AppController {
 
     // Status text
     const msg = {
-      [STATE.IDLE]: 'Ready',
+      [STATE.IDLE]: 'Ready — click the mic to begin',
       [STATE.MIC_NEEDED]: '👆 Click the mic button to begin',
-      [STATE.TTS]: '🔊 Listen to the question...',
-      [STATE.LISTENING]: '🎤 Speak the red text aloud',
-      [STATE.SUCCESS]: '✅ Well said! Great answer.',
-      [STATE.DONE]: '🎉 Track complete!'
+      [STATE.TTS]: '🔊 Listen carefully to the question...',
+      [STATE.LISTENING]: '🎤 Speak the answer aloud — take your time',
+      [STATE.SUCCESS]: '✅ Great! Moving to next in a moment...',
+      [STATE.DONE]: '🎉 Track complete! Great work!'
     }[s] || '';
     this.statusText.textContent = msg;
 
@@ -178,10 +186,22 @@ class AppController {
 
         if (this.autoAdvance) {
           if (this._advanceTimer) clearTimeout(this._advanceTimer);
-          this._advanceTimer = setTimeout(() => {
-            this._advanceTimer = null;
-            if (this._state === STATE.SUCCESS) this._nextQuestion();
-          }, 2000);
+
+          // Wait for silence: poll until user hasn't spoken for 2.5s, then advance
+          const waitForSilenceAndAdvance = () => {
+            const silenceDuration = Date.now() - (this.engine._lastSpeechTime || 0);
+            if (silenceDuration < 2500) {
+              // User recently spoke — keep waiting
+              this._advanceTimer = setTimeout(waitForSilenceAndAdvance, 400);
+            } else {
+              // User is truly done — advance
+              this._advanceTimer = null;
+              if (this._state === STATE.SUCCESS) this._nextQuestion();
+            }
+          };
+
+          // Give at least 2.5s before even checking (time for the ding + brief pause)
+          this._advanceTimer = setTimeout(waitForSilenceAndAdvance, 2500);
         }
       }
     };
@@ -388,7 +408,11 @@ class AppController {
   _onCustomQuestStart(quest) {
     this.teleprompterStage.style.display = 'flex';
     this.creatorStage.style.display = 'none';
+    this.resumeStage.style.display = 'none';
+    if (this.floatingDock) this.floatingDock.style.display = 'block';
     this.navTabs.forEach(t => t.classList.remove('active'));
+    const indTab = Array.from(this.navTabs).find(t => t.dataset.view === 'individual');
+    if (indTab) indTab.classList.add('active');
     if (this.trackSubSelector) this.trackSubSelector.style.display = 'none';
     this._loadTrack(quest);
   }
@@ -410,16 +434,29 @@ class AppController {
         if (view === 'individual') {
           this.teleprompterStage.style.display = 'flex';
           this.creatorStage.style.display = 'none';
+          this.resumeStage.style.display = 'none';
+          if (this.floatingDock) this.floatingDock.style.display = 'block';
           this._renderSubSelector('individual');
           this._loadTrack(INITIAL_QUESTS.individual[0]);
         } else if (view === 'business') {
           this.teleprompterStage.style.display = 'flex';
           this.creatorStage.style.display = 'none';
+          this.resumeStage.style.display = 'none';
+          if (this.floatingDock) this.floatingDock.style.display = 'block';
           this._renderSubSelector('business');
           this._loadTrack(INITIAL_QUESTS.business[0]);
+        } else if (view === 'resume') {
+          this.teleprompterStage.style.display = 'none';
+          this.creatorStage.style.display = 'none';
+          this.resumeStage.style.display = 'flex';
+          if (this.floatingDock) this.floatingDock.style.display = 'none';
+          if (this.trackSubSelector) this.trackSubSelector.style.display = 'none';
+          this.resumeStudio.render();
         } else if (view === 'creator') {
           this.teleprompterStage.style.display = 'none';
           this.creatorStage.style.display = 'block';
+          this.resumeStage.style.display = 'none';
+          if (this.floatingDock) this.floatingDock.style.display = 'none';
           if (this.trackSubSelector) this.trackSubSelector.style.display = 'none';
           this.creator.render();
         }

@@ -32,10 +32,16 @@ export class SpeechEngine {
     this.matchedSet = new Set();
     this.fullTranscript = '';     // cumulative transcript across restarts
 
-    // TTS
-    this.ttsRate = 0.88;
-    this.ttsPitch = 1.0;
+    // TTS configuration
+    this.ttsRate = 0.88; // Slightly slower = more natural, human presenter pace
+    this.ttsPitch = 1.0; // Natural conversational pitch
+    this.ttsVolume = 1.0;
     this.voice = null;
+    this.onVoiceChanged = null;
+
+    // Silence detection for smart auto-advance
+    this._lastSpeechTime = 0;
+    this._silenceTimer = null;
 
     // Support flags
     this.hasSR = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -55,20 +61,89 @@ export class SpeechEngine {
 
   // ─── VOICE SELECTION ─────────────────────────────────────────────────────
 
+  /**
+   * Returns available English voices ranked from most natural/human to robotic
+   */
+  getAvailableVoices() {
+    if (!this.hasTTS) return [];
+    const all = speechSynthesis.getVoices();
+    if (!all.length) return [];
+
+    return all
+      .filter(v => v.lang.startsWith('en'))
+      .sort((a, b) => {
+        const score = (v) => {
+          let s = 0;
+          const name = v.name.toLowerCase();
+          // Tier 1: Microsoft Azure Neural voices (Edge/Windows) — ultra-realistic human quality
+          if (name.includes('aria') || name.includes('jenny') || name.includes('guy')) s += 120;  // Top Azure Neural
+          if (name.includes('natural') || name.includes('online')) s += 110;
+          if (name.includes('neural')) s += 100;
+          // Tier 2: Google Premium voices
+          if (name.includes('google uk english female')) s += 80;
+          if (name.includes('google us english')) s += 75;
+          if (name.includes('google uk english male')) s += 70;
+          if (name.includes('google')) s += 60;
+          // Tier 3: Apple Enhanced macOS voices
+          if (name.includes('enhanced')) s += 55;
+          if (name.includes('samantha') || name.includes('karen') || name.includes('serena')) s += 45; // Apple
+          if (name.includes('daniel') || name.includes('oliver') || name.includes('arthur')) s += 40; // Apple GB
+          // Tier 4: Standard system voices
+          if (name.includes('zira')) s += 20;  // Windows standard female
+          if (name.includes('david')) s += 15;  // Windows standard male
+          // Heavily deprioritize old robotic 1990s desktop synth voices
+          if (name.includes('desktop')) s -= 80;
+          if (name.includes('espeak') || name.includes('festival')) s -= 80;
+          // Language preference
+          if (v.lang === 'en-US') s += 12;
+          if (v.lang === 'en-GB') s += 10;
+          if (v.lang === 'en-AU' || v.lang === 'en-IN') s += 5;
+          return s;
+        };
+        return score(b) - score(a);
+      });
+  }
+
   _pickVoice() {
     if (!this.hasTTS) return;
     const tryPick = () => {
-      const all = speechSynthesis.getVoices();
-      if (!all.length) return;
-      this.voice = (
-        all.find(v => /Google UK English Female|Google US English|Natural|Samantha|Karen/i.test(v.name) && v.lang.startsWith('en')) ||
-        all.find(v => v.lang === 'en-US') ||
-        all.find(v => v.lang.startsWith('en')) ||
-        all[0]
-      );
+      const voices = this.getAvailableVoices();
+      if (!voices.length) return;
+
+      const savedVoiceName = localStorage.getItem('prepsphere_selected_voice');
+      if (savedVoiceName) {
+        const match = voices.find(v => v.name === savedVoiceName);
+        if (match) {
+          this.voice = match;
+          this.onVoiceChanged?.(this.voice);
+          return;
+        }
+      }
+
+      // Pick top-ranked natural voice
+      this.voice = voices[0];
+      this.onVoiceChanged?.(this.voice);
     };
+
     tryPick();
     if (this.hasTTS) speechSynthesis.onvoiceschanged = tryPick;
+  }
+
+  setVoiceByName(voiceName) {
+    const voices = this.getAvailableVoices();
+    const match = voices.find(v => v.name === voiceName);
+    if (match) {
+      this.voice = match;
+      localStorage.setItem('prepsphere_selected_voice', voiceName);
+      this.onVoiceChanged?.(this.voice);
+      return true;
+    }
+    return false;
+  }
+
+  testVoicePreview(customText) {
+    const phrase = customText || "Hello! I am your AI interviewer today. I am looking forward to discussing your technical background and experience.";
+    this.speak(phrase);
   }
 
   // ─── AUDIO CONTEXT & MICROPHONE ──────────────────────────────────────────
@@ -190,14 +265,27 @@ export class SpeechEngine {
 
   // ─── SPEECH RECOGNITION ──────────────────────────────────────────────────
 
-  startListening(targetAnswer) {
+  /**
+   * Start listening for user's spoken answer.
+   * @param {string} targetAnswer  — target text (for word tracking in teleprompter mode; pass '' for free answer)
+   * @param {Function} [onLive]   — optional callback(liveText) fired on interim transcripts
+   * @param {Function} [onMatch]  — optional callback({matched, total, done}) fired on word match updates
+   */
+  startListening(targetAnswer, onLive, onMatch) {
     if (!this.hasSR) {
       this.onError?.('✏ Type your answer below — Speech Recognition not available in this browser.');
       return;
     }
 
+    // Override engine-level callbacks if provided directly (used by resume-studio free-answer mode)
+    if (typeof onLive === 'function') this._localOnLive = onLive;
+    else this._localOnLive = null;
+
+    if (typeof onMatch === 'function') this._localOnMatch = onMatch;
+    else this._localOnMatch = null;
+
     // Tokenize: clean and split target answer
-    this.targetTokens = targetAnswer
+    this.targetTokens = (targetAnswer || '')
       .toLowerCase()
       .replace(/[^\w\s']/g, ' ')
       .split(/\s+/)
@@ -208,6 +296,7 @@ export class SpeechEngine {
     this._isRestarting = false;
     this.fullTranscript = '';
     this.isListening = true;
+    this._lastSpeechTime = Date.now();
 
     this._launchRecognition();
   }
@@ -247,11 +336,23 @@ export class SpeechEngine {
         this.fullTranscript += ' ' + newFinalText.trim();
       }
 
+      // Mark that user has recently spoken (for silence detection)
+      const hasActivity = interimText.trim() || newFinalText.trim();
+      if (hasActivity) {
+        this._lastSpeechTime = Date.now();
+      }
+
       // Combine: what we've confirmed + what user is saying right now
       const combinedText = (this.fullTranscript + ' ' + interimText).trim();
 
-      // Send live text to UI
-      this.onLiveTranscript?.(interimText.trim() || newFinalText.trim());
+      // Fire live transcript — prefer component-level callback, fall back to engine-level
+      const liveText = interimText.trim() || newFinalText.trim();
+      if (this._localOnLive) {
+        // In free-answer mode (resume-studio simulation), deliver full accumulated text
+        const accumulated = (this.fullTranscript + ' ' + interimText).trim();
+        this._localOnLive(accumulated);
+      }
+      this.onLiveTranscript?.(liveText);
 
       // Tokenize spoken text
       const spokenTokens = combinedText
@@ -260,15 +361,21 @@ export class SpeechEngine {
         .split(/\s+/)
         .filter(Boolean);
 
-      // Fuzzy match against target
+      // Fuzzy match against target (only meaningful when targetTokens are set)
       this.matchedSet = this._matchTokens(spokenTokens, this.targetTokens, this.matchedSet);
 
       const matched = this.matchedSet.size;
       const total = this.targetTokens.length;
-      // 60% threshold — much more forgiving, closer to real conversation
-      const done = !this._completionFired && total > 0 && matched >= Math.ceil(total * 0.60);
+      // 85% threshold — requires user to speak most of the answer before signaling completion
+      // For free-answer mode (total === 0), never auto-complete via word match
+      const done = !this._completionFired && total > 0 && matched >= Math.ceil(total * 0.85);
 
-      this.onWordMatch?.({ matched: Array.from(this.matchedSet), total, done });
+      // Fire match callback — prefer component-level, fall back to engine-level
+      const matchPayload = { matched: Array.from(this.matchedSet), total, done };
+      if (this._localOnMatch) {
+        this._localOnMatch(matchPayload);
+      }
+      this.onWordMatch?.(matchPayload);
 
       if (done && !this._completionFired) {
         this._completionFired = true;
@@ -291,8 +398,8 @@ export class SpeechEngine {
     };
 
     r.onend = () => {
-      // CRITICAL: restart immediately on any end so there's no silent gap
-      if (this.isListening && !this._completionFired) {
+      // Continue listening without killing the mic so user can finish speaking smoothly
+      if (this.isListening) {
         this._scheduleRestart(150);
       }
     };
@@ -306,11 +413,11 @@ export class SpeechEngine {
   }
 
   _scheduleRestart(ms) {
-    if (!this.isListening || this._completionFired || this._isRestarting) return;
+    if (!this.isListening || this._isRestarting) return;
     this._isRestarting = true;
     setTimeout(() => {
       this._isRestarting = false;
-      if (this.isListening && !this._completionFired) {
+      if (this.isListening) {
         this._launchRecognition();
       }
     }, ms);
@@ -332,6 +439,8 @@ export class SpeechEngine {
     this._completionFired = false;
     this._isRestarting = false;
     this.fullTranscript = '';
+    this._localOnLive = null;
+    this._localOnMatch = null;
     this._killRecognition();
     this.matchedSet.clear();
   }
@@ -346,39 +455,59 @@ export class SpeechEngine {
 
     setTimeout(() => {
       this._cancelTTS = false;
-      const utt = new SpeechSynthesisUtterance(text);
-      utt.rate = this.ttsRate;
-      utt.pitch = this.ttsPitch;
-      if (this.voice) utt.voice = this.voice;
 
-      utt.onstart = () => {
-        if (this._cancelTTS) return;
-        this.isSpeaking = true;
-        this.onTTSStart?.();
+      // Split long text into sentences for more natural delivery (avoids Chrome TTS cutoff bug)
+      const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
+      let currentIdx = 0;
+
+      const speakNext = () => {
+        if (this._cancelTTS || currentIdx >= sentences.length) {
+          if (!this._cancelTTS) {
+            this.isSpeaking = false;
+            this.onTTSEnd?.();
+            onDone?.();
+          }
+          return;
+        }
+
+        const sentence = sentences[currentIdx++].trim();
+        if (!sentence) { speakNext(); return; }
+
+        const utt = new SpeechSynthesisUtterance(sentence);
+        utt.rate = this.ttsRate;
+        utt.pitch = this.ttsPitch;
+        utt.volume = this.ttsVolume;
+        if (this.voice) utt.voice = this.voice;
+
+        if (currentIdx === 1) {
+          utt.onstart = () => {
+            if (this._cancelTTS) return;
+            this.isSpeaking = true;
+            this.onTTSStart?.();
+          };
+        }
+
+        utt.onend = () => {
+          if (this._cancelTTS) return;
+          speakNext();
+        };
+
+        utt.onerror = (e) => {
+          if (this._cancelTTS || e.error === 'canceled') return;
+          speakNext(); // Skip problematic sentence, try next
+        };
+
+        speechSynthesis.speak(utt);
       };
 
-      utt.onend = () => {
-        if (this._cancelTTS) return;
-        this.isSpeaking = false;
-        this.onTTSEnd?.();
-        onDone?.();
-      };
+      speakNext();
 
-      utt.onerror = (e) => {
-        if (this._cancelTTS || e.error === 'canceled') return;
-        this.isSpeaking = false;
-        this.onTTSEnd?.();
-        onDone?.();
-      };
-
-      speechSynthesis.speak(utt);
-
-      // Chrome: resume if tab loses focus
+      // Chrome: resume if tab loses focus during TTS
       const check = setInterval(() => {
         if (!this.isSpeaking) { clearInterval(check); return; }
         if (speechSynthesis.paused) speechSynthesis.resume();
       }, 250);
-    }, 100);
+    }, 80);
   }
 
   stopSpeaking() {
